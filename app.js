@@ -1,5 +1,5 @@
 // ============================================
-// TOEFL 单词记忆大师 - Application Logic
+// TOEFL 单词记忆大师 - Application Logic (Enhanced)
 // ============================================
 
 // ---- Global State ----
@@ -24,6 +24,16 @@ let isMarkMasterProcessing = false;
 let meaningMask = false;
 let transMask = false;
 
+// ---- New Features State ----
+let streakData = { current: 0, lastDate: null, best: 0 };
+let dailyStats = {}; // { "YYYY-MM-DD": { learned: 0, reviewed: 0, time: 0 } }
+let studyTimer = { startTime: null, totalSeconds: 0, todaySeconds: 0 };
+let pomodoro = { duration: 25 * 60, remaining: 25 * 60, running: false, interval: null, completed: 0 };
+let achievements = {};
+let darkModePref = 'auto';
+let selectedListItems = new Set();
+let quizHistory = []; // For difficulty tracking
+
 // ---- Storage Keys ----
 const STORAGE = {
     fav: 'tf_fav',
@@ -36,7 +46,14 @@ const STORAGE = {
     notes: 'tf_notes',
     review: 'tf_review',
     font: 'tf_font',
-    rate: 'tf_rate'
+    rate: 'tf_rate',
+    streak: 'tf_streak',
+    dailyStats: 'tf_daily_stats',
+    studyTime: 'tf_study_time',
+    pomodoro: 'tf_pomodoro',
+    achievements: 'tf_achievements',
+    darkMode: 'tf_dark_mode',
+    quizHistory: 'tf_quiz_history'
 };
 
 // ============================================
@@ -55,6 +72,13 @@ function saveData() {
         localStorage.setItem(STORAGE.review, JSON.stringify(reviewRecord));
         localStorage.setItem(STORAGE.font, baseFontSize);
         localStorage.setItem(STORAGE.rate, speechRate);
+        localStorage.setItem(STORAGE.streak, JSON.stringify(streakData));
+        localStorage.setItem(STORAGE.dailyStats, JSON.stringify(dailyStats));
+        localStorage.setItem(STORAGE.studyTime, JSON.stringify(studyTimer));
+        localStorage.setItem(STORAGE.pomodoro, JSON.stringify(pomodoro));
+        localStorage.setItem(STORAGE.achievements, JSON.stringify(achievements));
+        localStorage.setItem(STORAGE.darkMode, darkModePref);
+        localStorage.setItem(STORAGE.quizHistory, JSON.stringify(quizHistory));
         updateMistakeBadge();
     } catch (e) {
         console.error("Storage error:", e);
@@ -73,9 +97,18 @@ function loadData() {
     classicIdx = parseInt(localStorage.getItem(STORAGE.cidx) || '0');
     baseFontSize = parseInt(localStorage.getItem(STORAGE.font) || '16');
     speechRate = parseFloat(localStorage.getItem(STORAGE.rate) || '0.9');
+    streakData = JSON.parse(localStorage.getItem(STORAGE.streak) || '{"current":0,"lastDate":null,"best":0}');
+    dailyStats = JSON.parse(localStorage.getItem(STORAGE.dailyStats) || '{}');
+    studyTimer = JSON.parse(localStorage.getItem(STORAGE.studyTime) || '{"startTime":null,"totalSeconds":0,"todaySeconds":0}');
+    pomodoro = JSON.parse(localStorage.getItem(STORAGE.pomodoro) || '{"duration":1500,"remaining":1500,"running":false,"completed":0}');
+    achievements = JSON.parse(localStorage.getItem(STORAGE.achievements) || '{}');
+    darkModePref = localStorage.getItem(STORAGE.darkMode) || 'auto';
+    quizHistory = JSON.parse(localStorage.getItem(STORAGE.quizHistory) || '[]');
     if (isNaN(classicIdx)) classicIdx = 0;
     setFontSize(baseFontSize, false);
     updateMistakeBadge();
+    checkStreak();
+    applyDarkMode();
 }
 
 function showToast(msg, duration = 2000) {
@@ -120,6 +153,98 @@ function updateMistakeBadge() {
     }
 }
 
+function getTodayKey() {
+    return new Date().toISOString().split('T')[0];
+}
+
+function getDateKey(date) {
+    return date.toISOString().split('T')[0];
+}
+
+// ============================================
+// Streak System
+// ============================================
+
+function checkStreak() {
+    const today = getTodayKey();
+    const yesterday = getDateKey(new Date(Date.now() - 86400000));
+
+    if (!streakData.lastDate) {
+        streakData.current = 0;
+    } else if (streakData.lastDate === today) {
+        // Already studied today, streak intact
+    } else if (streakData.lastDate === yesterday) {
+        // Streak continues if studied today (will be set when they study)
+    } else {
+        // Streak broken
+        streakData.current = 0;
+    }
+
+    if (streakData.current > streakData.best) {
+        streakData.best = streakData.current;
+    }
+}
+
+function recordStudy() {
+    const today = getTodayKey();
+    const yesterday = getDateKey(new Date(Date.now() - 86400000));
+
+    if (!dailyStats[today]) {
+        dailyStats[today] = { learned: 0, reviewed: 0, time: 0 };
+    }
+
+    if (streakData.lastDate !== today) {
+        if (streakData.lastDate === yesterday || streakData.lastDate === null) {
+            streakData.current++;
+            if (streakData.current > streakData.best) {
+                streakData.best = streakData.current;
+            }
+            if (streakData.current > 0) {
+                showToast(`🔥 连续打卡 ${streakData.current} 天！`, 3000);
+            }
+        }
+        streakData.lastDate = today;
+    }
+
+    saveData();
+    checkAchievements();
+}
+
+function recordLearned() {
+    const today = getTodayKey();
+    if (!dailyStats[today]) dailyStats[today] = { learned: 0, reviewed: 0, time: 0 };
+    dailyStats[today].learned++;
+    saveData();
+}
+
+function recordReviewed() {
+    const today = getTodayKey();
+    if (!dailyStats[today]) dailyStats[today] = { learned: 0, reviewed: 0, time: 0 };
+    dailyStats[today].reviewed++;
+    saveData();
+}
+
+function recordStudyTime(seconds) {
+    const today = getTodayKey();
+    if (!dailyStats[today]) dailyStats[today] = { learned: 0, reviewed: 0, time: 0 };
+    dailyStats[today].time += seconds;
+    studyTimer.totalSeconds += seconds;
+    studyTimer.todaySeconds += seconds;
+    saveData();
+}
+
+function getStreakHtml() {
+    if (streakData.current <= 0) return '';
+    return `
+    <div class="streak-display">
+        <span class="streak-flame">🔥</span>
+        <div>
+            <div class="streak-text">连续打卡 ${streakData.current} 天</div>
+            <div class="streak-sub">最佳记录: ${streakData.best} 天</div>
+        </div>
+    </div>`;
+}
+
 // ============================================
 // Audio & Speech
 // ============================================
@@ -155,6 +280,25 @@ function playWrongSound() {
         osc.start();
         gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.3);
         osc.stop(audioCtx.currentTime + 0.3);
+    } catch (e) {}
+}
+
+function playAchievementSound() {
+    try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const notes = [523, 659, 784, 1047];
+        notes.forEach((freq, i) => {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.frequency.value = freq;
+            gain.gain.value = 0.15;
+            osc.type = 'sine';
+            osc.start(audioCtx.currentTime + i * 0.15);
+            gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + i * 0.15 + 0.3);
+            osc.stop(audioCtx.currentTime + i * 0.15 + 0.3);
+        });
     } catch (e) {}
 }
 
@@ -204,6 +348,36 @@ function setSpeechRate(rate) {
 }
 
 // ============================================
+// Dark Mode
+// ============================================
+
+function setDarkMode(mode) {
+    darkModePref = mode;
+    saveData();
+    applyDarkMode();
+    const labels = { auto: '跟随系统', light: '浅色', dark: '深色' };
+    showToast(`🌙 已切换至${labels[mode]}模式`);
+    closePanels();
+}
+
+function applyDarkMode() {
+    if (darkModePref === 'auto') {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (prefersDark) {
+            applyTheme(5);
+        } else {
+            const savedTheme = localStorage.getItem(STORAGE.theme) || '1';
+            applyTheme(parseInt(savedTheme));
+        }
+    } else if (darkModePref === 'dark') {
+        applyTheme(5);
+    } else {
+        const savedTheme = localStorage.getItem(STORAGE.theme) || '1';
+        applyTheme(parseInt(savedTheme));
+    }
+}
+
+// ============================================
 // Theme System
 // ============================================
 
@@ -229,6 +403,10 @@ function applyTheme(id) {
 }
 
 function setTheme(id) {
+    if (darkModePref === 'auto') {
+        darkModePref = 'light';
+        saveData();
+    }
     applyTheme(id);
     const names = { 1: '深海蓝', 2: '暮光紫', 3: '森林绿', 4: '暖阳橙', 5: '暗夜黑' };
     showToast(`🎨 已切换至「${names[id]}」主题`);
@@ -257,6 +435,345 @@ function refreshParticles() {
         container.appendChild(p);
     }
 }
+
+// ============================================
+// Import / Export Data
+// ============================================
+
+function exportData() {
+    const data = {
+        favorites,
+        difficult,
+        learned,
+        mastered,
+        mistakeBook,
+        wordNotes,
+        reviewRecord,
+        classicIdx,
+        streakData,
+        dailyStats,
+        studyTimer,
+        pomodoro,
+        achievements,
+        quizHistory,
+        exportDate: new Date().toISOString(),
+        version: '2.0'
+    };
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `toefl_words_backup_${getTodayKey()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('📤 数据已导出');
+    closePanels();
+}
+
+function showImportPanel() {
+    document.getElementById('importPanel').classList.add('open');
+    document.getElementById('overlay').classList.add('show');
+}
+
+function importData() {
+    try {
+        const json = document.getElementById('importDataArea').value.trim();
+        if (!json) { showToast('⚠️ 请输入数据'); return; }
+        const data = JSON.parse(json);
+
+        if (data.favorites) favorites = data.favorites;
+        if (data.difficult) difficult = data.difficult;
+        if (data.learned) learned = data.learned;
+        if (data.mastered) mastered = data.mastered;
+        if (data.mistakeBook) mistakeBook = data.mistakeBook;
+        if (data.wordNotes) wordNotes = data.wordNotes;
+        if (data.reviewRecord) reviewRecord = data.reviewRecord;
+        if (data.classicIdx !== undefined) classicIdx = data.classicIdx;
+        if (data.streakData) streakData = data.streakData;
+        if (data.dailyStats) dailyStats = data.dailyStats;
+        if (data.studyTimer) studyTimer = data.studyTimer;
+        if (data.pomodoro) pomodoro = data.pomodoro;
+        if (data.achievements) achievements = data.achievements;
+        if (data.quizHistory) quizHistory = data.quizHistory;
+
+        saveData();
+        showToast('✅ 数据导入成功！');
+        closePanels();
+        renderHome();
+    } catch (e) {
+        showToast('❌ 导入失败，请检查数据格式');
+        console.error(e);
+    }
+}
+
+// ============================================
+// Pomodoro Timer
+// ============================================
+
+function toggleTimer() {
+    const btn = document.getElementById('timerStartBtn');
+    if (pomodoro.running) {
+        clearInterval(pomodoro.interval);
+        pomodoro.running = false;
+        btn.innerHTML = '▶ 继续';
+        showToast('⏸️ 计时已暂停');
+    } else {
+        pomodoro.running = true;
+        btn.innerHTML = '⏸️ 暂停';
+        pomodoro.interval = setInterval(() => {
+            pomodoro.remaining--;
+            recordStudyTime(1);
+            updateTimerDisplay();
+            if (pomodoro.remaining <= 0) {
+                clearInterval(pomodoro.interval);
+                pomodoro.running = false;
+                pomodoro.completed++;
+                pomodoro.remaining = pomodoro.duration;
+                btn.innerHTML = '▶ 开始';
+                playCorrectSound();
+                showToast('🎉 番茄钟完成！休息一下吧', 4000);
+                checkAchievements();
+                saveData();
+            }
+        }, 1000);
+    }
+    saveData();
+}
+
+function resetTimer() {
+    clearInterval(pomodoro.interval);
+    pomodoro.running = false;
+    pomodoro.remaining = pomodoro.duration;
+    document.getElementById('timerStartBtn').innerHTML = '▶ 开始';
+    updateTimerDisplay();
+    saveData();
+}
+
+function setTimerDuration(minutes) {
+    clearInterval(pomodoro.interval);
+    pomodoro.running = false;
+    pomodoro.duration = minutes * 60;
+    pomodoro.remaining = minutes * 60;
+    document.getElementById('timerStartBtn').innerHTML = '▶ 开始';
+    updateTimerDisplay();
+    saveData();
+    showToast(`⏱️ 已设置为 ${minutes} 分钟`);
+}
+
+function updateTimerDisplay() {
+    const mins = Math.floor(pomodoro.remaining / 60);
+    const secs = pomodoro.remaining % 60;
+    document.getElementById('timerDisplay').textContent = 
+        `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    document.getElementById('todayStudyTime').textContent = 
+        `${Math.floor(studyTimer.todaySeconds / 60)}分钟`;
+    document.getElementById('completedPomodoros').textContent = pomodoro.completed;
+    document.getElementById('totalStudyTime').textContent = 
+        `${Math.floor(studyTimer.totalSeconds / 60)}分钟`;
+}
+
+// ============================================
+// Achievements System
+// ============================================
+
+const ACHIEVEMENTS_DEF = [
+    { id: 'first_word', name: '初出茅庐', desc: '学习第一个单词', icon: '🌱', condition: () => Object.keys(learned).length >= 1 },
+    { id: 'ten_words', name: '小试牛刀', desc: '学习10个单词', icon: '📚', condition: () => Object.keys(learned).length >= 10 },
+    { id: 'hundred_words', name: '百词斩', desc: '学习100个单词', icon: '💯', condition: () => Object.keys(learned).length >= 100 },
+    { id: 'five_hundred', name: '词汇达人', desc: '学习500个单词', icon: '👑', condition: () => Object.keys(learned).length >= 500 },
+    { id: 'master_ten', name: '初窥门径', desc: '掌握10个单词', icon: '✨', condition: () => Object.keys(mastered).length >= 10 },
+    { id: 'master_hundred', name: '融会贯通', desc: '掌握100个单词', icon: '🌟', condition: () => Object.keys(mastered).length >= 100 },
+    { id: 'streak_3', name: '坚持不懈', desc: '连续打卡3天', icon: '🔥', condition: () => streakData.current >= 3 },
+    { id: 'streak_7', name: '持之以恒', desc: '连续打卡7天', icon: '🔥🔥', condition: () => streakData.current >= 7 },
+    { id: 'streak_30', name: '习惯养成', desc: '连续打卡30天', icon: '🏆', condition: () => streakData.current >= 30 },
+    { id: 'first_quiz', name: '初试锋芒', desc: '完成第一次测验', icon: '📝', condition: () => quizHistory.length >= 1 },
+    { id: 'quiz_master', name: '答题高手', desc: '累计答对50题', icon: '🎯', condition: () => quizHistory.filter(q => q.correct).length >= 50 },
+    { id: 'perfect_quiz', name: '全对挑战', desc: '连续答对10题', icon: '💎', condition: () => {
+        let maxStreak = 0, current = 0;
+        quizHistory.forEach(q => {
+            if (q.correct) { current++; maxStreak = Math.max(maxStreak, current); }
+            else current = 0;
+        });
+        return maxStreak >= 10;
+    }},
+    { id: 'collector', name: '收藏家', desc: '收藏20个单词', icon: '⭐', condition: () => favorites.length >= 20 },
+    { id: 'note_taker', name: '好记性', desc: '为10个单词添加笔记', icon: '📝', condition: () => Object.keys(wordNotes).filter(k => wordNotes[k]).length >= 10 },
+    { id: 'pomodoro_1', name: '专注时刻', desc: '完成1个番茄钟', icon: '🍅', condition: () => pomodoro.completed >= 1 },
+    { id: 'pomodoro_10', name: '时间管理大师', desc: '完成10个番茄钟', icon: '⏰', condition: () => pomodoro.completed >= 10 },
+    { id: 'night_owl', name: '夜猫子', desc: '在晚上10点后学习', icon: '🌙', condition: () => {
+        const hour = new Date().getHours();
+        return hour >= 22;
+    }},
+    { id: 'early_bird', name: '早起的鸟儿', desc: '在早上6点前学习', icon: '🌅', condition: () => {
+        const hour = new Date().getHours();
+        return hour < 6;
+    }}
+];
+
+function checkAchievements() {
+    let newUnlock = false;
+    ACHIEVEMENTS_DEF.forEach(ach => {
+        if (!achievements[ach.id] && ach.condition()) {
+            achievements[ach.id] = { unlocked: true, date: Date.now() };
+            newUnlock = true;
+            showToast(`🏆 解锁成就：${ach.name}！`, 3000);
+        }
+    });
+    if (newUnlock) {
+        playAchievementSound();
+        saveData();
+    }
+}
+
+function renderBadgePanel() {
+    const container = document.getElementById('badgeContent');
+    container.innerHTML = ACHIEVEMENTS_DEF.map(ach => {
+        const unlocked = achievements[ach.id];
+        return `
+        <div class="badge-item ${unlocked ? 'unlocked' : 'locked'} ${unlocked ? 'badge-unlock-anim' : ''}">
+            <div class="badge-icon">${ach.icon}</div>
+            <div class="badge-name">${ach.name}</div>
+            <div class="badge-desc">${ach.desc}</div>
+            ${unlocked ? `<div style="font-size:10px; color:var(--success); margin-top:4px;">✅ 已解锁</div>` : ''}
+        </div>`;
+    }).join('');
+}
+
+// ============================================
+// Charts & Visualization
+// ============================================
+
+function renderTrendChart() {
+    const container = document.getElementById('trendChart');
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date(Date.now() - i * 86400000);
+        days.push(getDateKey(d));
+    }
+
+    const maxVal = Math.max(...days.map(d => (dailyStats[d] || {}).learned || 0), 1);
+
+    container.innerHTML = days.map((d, i) => {
+        const val = (dailyStats[d] || {}).learned || 0;
+        const height = Math.max((val / maxVal) * 100, 4);
+        const dateLabel = d.slice(5);
+        return `
+        <div class="trend-bar" style="height:${height}%" title="${d}: 学习${val}词">
+            <div class="trend-bar-value">${val}</div>
+            <div class="trend-bar-label">${dateLabel}</div>
+        </div>`;
+    }).join('');
+}
+
+function renderHeatmap() {
+    const container = document.getElementById('heatmapChart');
+    const days = [];
+    for (let i = 29; i >= 0; i--) {
+        const d = new Date(Date.now() - i * 86400000);
+        days.push(getDateKey(d));
+    }
+
+    const maxVal = Math.max(...days.map(d => (dailyStats[d] || {}).learned || 0), 1);
+
+    container.innerHTML = days.map(d => {
+        const val = (dailyStats[d] || {}).learned || 0;
+        const intensity = val / maxVal;
+        let opacity = 0.1;
+        if (intensity > 0.8) opacity = 0.9;
+        else if (intensity > 0.6) opacity = 0.7;
+        else if (intensity > 0.3) opacity = 0.5;
+        else if (intensity > 0) opacity = 0.3;
+
+        return `<div class="heatmap-cell" style="background:rgba(37,99,235,${opacity})" title="${d}: ${val}词"></div>`;
+    }).join('');
+}
+
+function renderWeakPointAnalysis() {
+    const container = document.getElementById('weakPointAnalysis');
+    if (mistakeBook.length === 0) {
+        container.innerHTML = `<div class="empty-state" style="padding:24px;"><div class="empty-state-icon">🎉</div><div class="empty-state-text">暂无薄弱点，继续保持！</div></div>`;
+        return;
+    }
+
+    // Count mistakes by mode
+    const modeCount = {};
+    mistakeBook.forEach(m => {
+        modeCount[m.mode] = (modeCount[m.mode] || 0) + 1;
+    });
+
+    const modeLabels = {
+        'word2meaning': '单词选含义',
+        'meaning2word': '含义选单词',
+        'example2word': '例句填空'
+    };
+
+    // Find most mistaken words
+    const wordMistakes = {};
+    mistakeBook.forEach(m => {
+        if (m.wordIndex !== undefined) {
+            wordMistakes[m.wordIndex] = (wordMistakes[m.wordIndex] || 0) + 1;
+        }
+    });
+
+    const topWords = Object.entries(wordMistakes)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([idx, count]) => {
+            const w = words[idx];
+            return w ? `<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border);"><span>${escapeHtml(w['单词'])}</span><span style="color:var(--danger); font-weight:700;">${count}次</span></div>` : '';
+        }).join('');
+
+    container.innerHTML = `
+        <div style="margin-bottom:16px;">
+            <div style="font-weight:600; margin-bottom:8px; color:var(--text);">📊 易错题型分布</div>
+            ${Object.entries(modeCount).map(([mode, count]) => `
+                <div style="display:flex; justify-content:space-between; align-items:center; margin:6px 0;">
+                    <span>${modeLabels[mode] || mode}</span>
+                    <div style="display:flex; align-items:center; gap:8px; flex:1; margin-left:12px;">
+                        <div style="flex:1; height:8px; background:var(--bg); border-radius:4px; overflow:hidden;">
+                            <div style="width:${(count / mistakeBook.length * 100)}%; height:100%; background:var(--danger); border-radius:4px;"></div>
+                        </div>
+                        <span style="font-size:12px; color:var(--danger); font-weight:600;">${count}</span>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+        <div>
+            <div style="font-weight:600; margin-bottom:8px; color:var(--text);">⚠️ 最常错单词 TOP5</div>
+            ${topWords || '<div style="color:var(--text-muted); font-size:0.9rem;">暂无数据</div>'}
+        </div>
+    `;
+}
+
+// ============================================
+// Smart Difficulty
+// ============================================
+
+function getSmartDifficulty() {
+    if (quizHistory.length < 5) return 'medium';
+    const recent = quizHistory.slice(-10);
+    const correctRate = recent.filter(q => q.correct).length / recent.length;
+    if (correctRate > 0.8) return 'hard';
+    if (correctRate < 0.5) return 'easy';
+    return 'medium';
+}
+
+function getWordDifficulty(idx) {
+    const wordMistakes = mistakeBook.filter(m => m.wordIndex === idx).length;
+    if (wordMistakes >= 3) return 'hard';
+    if (wordMistakes >= 1) return 'medium';
+    if (mastered[idx]) return 'easy';
+    return 'medium';
+}
+
+function getDifficultyLabel(idx) {
+    const d = getWordDifficulty(idx);
+    const labels = { easy: '简单', medium: '中等', hard: '困难' };
+    const classes = { easy: 'difficulty-easy', medium: 'difficulty-medium', hard: 'difficulty-hard' };
+    return `<span class="difficulty-badge ${classes[d]}">${labels[d]}</span>`;
+}
+
 
 // ============================================
 // View Rendering
@@ -288,6 +805,7 @@ function renderHome() {
 
     const stats = `
     <div class="stats-dashboard fade-in">
+        ${getStreakHtml()}
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="stat-number">${total}</div>
@@ -351,6 +869,7 @@ function renderHome() {
 
     document.getElementById('main').innerHTML = stats + hall;
     currentView = "home";
+    recordStudy();
 }
 
 // ---- Search ----
@@ -404,6 +923,8 @@ function doSearch() {
 // ---- Word List ----
 function renderWordList() {
     currentView = "wordlist";
+    selectedListItems.clear();
+
     const filterHtml = `
     <div class="filter-bar fade-in">
         <button class="filter-btn active" onclick="filterList('all', this)">📚 全部</button>
@@ -415,6 +936,12 @@ function renderWordList() {
     document.getElementById('main').innerHTML = `
         <div class="home-corner" onclick="goHome()">🏠</div>
         ${filterHtml}
+        <div class="batch-bar" id="batchBar" style="display:none;">
+            <span class="batch-bar-info">已选 <span id="batchCount">0</span> 项</span>
+            <button class="btn btn-sm btn-success" onclick="batchMaster()">✅ 标记掌握</button>
+            <button class="btn btn-sm btn-danger" onclick="batchRemoveFav()">💔 取消收藏</button>
+            <button class="btn btn-sm btn-ghost" onclick="clearBatchSelection()">取消</button>
+        </div>
         <div class="list-card">
             <div id="listContent"></div>
         </div>`;
@@ -448,8 +975,12 @@ function filterList(type, btn) {
     let html = `<div style="margin-bottom:12px; color:var(--text-muted); font-size:0.9rem;">共 ${list.length} 个单词</div>`;
     list.forEach((item, i) => {
         const w = item.word;
+        const isSelected = selectedListItems.has(item.idx);
         html += `
-        <div class="list-item" onclick="jumpToWord(${item.idx})">
+        <div class="list-item ${isSelected ? 'selected' : ''}" onclick="toggleListSelection(${item.idx}, this)" ondblclick="jumpToWord(${item.idx})">
+            <div class="list-item-checkbox ${isSelected ? 'checked' : ''}" onclick="event.stopPropagation(); toggleListSelection(${item.idx}, this.parentElement)">
+                ${isSelected ? '✓' : ''}
+            </div>
             <div class="list-item-index">${i + 1}</div>
             <div class="list-item-content">
                 <div class="list-item-word">${escapeHtml(w['单词'])}</div>
@@ -460,10 +991,72 @@ function filterList(type, btn) {
                 ${learned[item.idx] ? '<span class="tag tag-success">已学</span>' : '<span class="tag">未学</span>'}
                 ${mastered[item.idx] ? '<span class="tag tag-primary">已掌握</span>' : ''}
                 ${difficult.includes(item.idx) ? '<span class="tag tag-danger">难词</span>' : ''}
+                ${getDifficultyLabel(item.idx)}
             </div>
         </div>`;
     });
     cont.innerHTML = html;
+    updateBatchBar();
+}
+
+function toggleListSelection(idx, el) {
+    if (selectedListItems.has(idx)) {
+        selectedListItems.delete(idx);
+        el.classList.remove('selected');
+        el.querySelector('.list-item-checkbox').classList.remove('checked');
+        el.querySelector('.list-item-checkbox').innerHTML = '';
+    } else {
+        selectedListItems.add(idx);
+        el.classList.add('selected');
+        el.querySelector('.list-item-checkbox').classList.add('checked');
+        el.querySelector('.list-item-checkbox').innerHTML = '✓';
+    }
+    updateBatchBar();
+}
+
+function updateBatchBar() {
+    const bar = document.getElementById('batchBar');
+    const count = document.getElementById('batchCount');
+    if (selectedListItems.size > 0) {
+        bar.style.display = 'flex';
+        count.textContent = selectedListItems.size;
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+function clearBatchSelection() {
+    selectedListItems.clear();
+    // Re-render current filter
+    const activeBtn = document.querySelector('.filter-btn.active');
+    if (activeBtn) {
+        const type = activeBtn.textContent.includes('全部') ? 'all' :
+                     activeBtn.textContent.includes('收藏') ? 'fav' :
+                     activeBtn.textContent.includes('难词') ? 'diff' : 'unlearn';
+        filterList(type, activeBtn);
+    }
+}
+
+function batchMaster() {
+    selectedListItems.forEach(idx => {
+        mastered[idx] = true;
+        learned[idx] = true;
+        difficult = difficult.filter(i => i !== idx);
+    });
+    saveData();
+    showToast(`✅ 已批量标记 ${selectedListItems.size} 个单词为已掌握`);
+    clearBatchSelection();
+    checkAchievements();
+}
+
+function batchRemoveFav() {
+    selectedListItems.forEach(idx => {
+        const p = favorites.indexOf(idx);
+        if (p !== -1) favorites.splice(p, 1);
+    });
+    saveData();
+    showToast(`💔 已取消 ${selectedListItems.size} 个单词的收藏`);
+    clearBatchSelection();
 }
 
 function jumpToWord(idx) {
@@ -487,6 +1080,7 @@ function startClassic() {
     mainEl.innerHTML = `<div class="card-base fade-in" id="classicCard"></div>`;
     classicContainer = document.getElementById('classicCard');
     updateClassicContent();
+    recordStudy();
 }
 
 function getRealIdx(wordObj) {
@@ -531,6 +1125,7 @@ function updateClassicContent() {
                 <span style="font-size:1.2rem;">🔊</span>
             </div>
             <div class="word-phonetic">/${escapeHtml(word['读音'] || '未知')}/</div>
+            ${realIdx !== -1 ? getDifficultyLabel(realIdx) : ''}
         </div>
         <div class="word-actions">
             <button class="icon-btn" onclick="toggleFavClassic(${realIdx})" title="${isFav ? '取消收藏' : '收藏'}">
@@ -565,6 +1160,10 @@ function updateClassicContent() {
         <textarea id="noteArea" placeholder="在此记录你对这个单词的理解、联想或记忆技巧..." onblur="saveWordNote(${realIdx})">${escapeHtml(note)}</textarea>
     </div>
 
+    <div style="font-size:0.8rem; color:var(--text-muted); text-align:center; margin-top:8px;">
+        ⌨️ Space发音 · ← →切换 · M掌握 · D难词 · F收藏
+    </div>
+
     <div class="action-group">
         <button class="btn btn-secondary" onclick="prevClassic()">◀ 上一个</button>
         <button class="btn btn-danger" onclick="markDiffClassic(${realIdx})">${isDiff ? '💚 取消难词' : '🤔 标记难词'}</button>
@@ -592,6 +1191,7 @@ window.toggleFavClassic = function(idx) {
     p === -1 ? favorites.push(idx) : favorites.splice(p, 1);
     saveData();
     updateClassicContent();
+    checkAchievements();
 };
 
 window.markDiffClassic = function(idx) {
@@ -609,9 +1209,11 @@ window.markMasterClassic = function(idx) {
     learned[idx] = true;
     difficult = difficult.filter(i => i !== idx);
     reviewRecord[idx] = Date.now();
+    recordLearned();
     saveData();
     updateClassicContent();
     showToast("🎉 已掌握！继续加油！");
+    checkAchievements();
     setTimeout(() => {
         nextClassic();
         isMarkMasterProcessing = false;
@@ -633,14 +1235,17 @@ window.nextClassic = function() {
     saveData();
 };
 
+
 // ============================================
-// Dictation Mode
+// Dictation Mode (with hints)
 // ============================================
 
 let dictationAnswer = "";
+let dictationHintLevel = 0; // 0=none, 1=first letter, 2=length, 3=first+last
 
 function startDictation() {
     currentView = "dictation";
+    dictationHintLevel = 0;
     const idx = Math.floor(Math.random() * words.length);
     const w = words[idx];
     dictationAnswer = w['单词'];
@@ -654,9 +1259,11 @@ function startDictation() {
         <div class="dictation-hint">
             <div style="font-size:1.3rem; font-weight:700; color:var(--text); margin-bottom:8px;">${escapeHtml(w['单词中文意思'])}</div>
             <div style="font-size:0.85rem;">请根据中文释义写出对应的英文单词</div>
+            <div class="dictation-hint-hint" id="dictHint"></div>
         </div>
         <input class="input-mo" id="dictInput" placeholder="在此输入英文单词..." onkeydown="if(event.key==='Enter')checkDictation()">
         <div class="action-group" style="justify-content:center;">
+            <button class="btn btn-warning" onclick="showDictHint()">💡 提示</button>
             <button class="btn btn-primary" onclick="checkDictation()">✅ 提交</button>
             <button class="btn btn-secondary" onclick="startDictation()">🔄 下一题</button>
         </div>
@@ -665,9 +1272,27 @@ function startDictation() {
 
     document.getElementById('main').innerHTML = html;
     setTimeout(() => document.getElementById('dictInput')?.focus(), 100);
+    recordStudy();
 }
 
 function renderDictation() {}
+
+function showDictHint() {
+    dictationHintLevel++;
+    const hintEl = document.getElementById('dictHint');
+    const ans = dictationAnswer;
+
+    if (dictationHintLevel === 1) {
+        hintEl.textContent = `首字母: ${ans[0].toUpperCase()}`;
+    } else if (dictationHintLevel === 2) {
+        hintEl.textContent = `首字母: ${ans[0].toUpperCase()} · 长度: ${ans.length} 个字母`;
+    } else if (dictationHintLevel === 3) {
+        const masked = ans[0] + '_'.repeat(ans.length - 2) + ans[ans.length - 1];
+        hintEl.textContent = `提示: ${masked}`;
+    } else {
+        hintEl.textContent = `完整答案: ${ans}`;
+    }
+}
 
 function checkDictation() {
     const input = document.getElementById('dictInput').value.trim().toLowerCase();
@@ -677,6 +1302,7 @@ function checkDictation() {
     if (input === ans) {
         tip.innerHTML = `<span style="color:var(--success); font-weight:700; font-size:1.1rem;">🎉 正确！太棒了！</span>`;
         playCorrectSound();
+        recordLearned();
         setTimeout(() => startDictation(), 1200);
     } else {
         tip.innerHTML = `<span style="color:var(--danger); font-weight:700;">❌ 错误，正确答案是：<span style="font-size:1.2rem;">${dictationAnswer}</span></span>`;
@@ -708,15 +1334,16 @@ function startSmartReview() {
     classicIdx = needReview[Math.floor(Math.random() * needReview.length)];
     showToast(`📚 为你挑选了 ${needReview.length} 个待复习单词`);
     startClassic();
+    recordReviewed();
 }
 
 // ============================================
-// Quiz System
+// Quiz System (with smart difficulty)
 // ============================================
 
 function maskExample(sentence, target) {
     if (!sentence || !target) return sentence;
-    const escapedTarget = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedTarget = target.replace(/[.*+?^${}()|[\]\]/g, '\$&');
     const regex = new RegExp(`(${escapedTarget})`, 'gi');
     return sentence.replace(regex, '______');
 }
@@ -729,16 +1356,38 @@ function getBackupOptions(correct, type, count) {
     return shuffle([...candidates]).slice(0, count);
 }
 
+function getSmartWordPool() {
+    const diff = getSmartDifficulty();
+    let pool = words.map((w, i) => ({ word: w, idx: i }));
+
+    if (diff === 'hard') {
+        // Prefer difficult words and unlearned words
+        pool.sort((a, b) => {
+            const aDiff = difficult.includes(a.idx) ? 2 : mastered[a.idx] ? 0 : 1;
+            const bDiff = difficult.includes(b.idx) ? 2 : mastered[b.idx] ? 0 : 1;
+            return bDiff - aDiff;
+        });
+    } else if (diff === 'easy') {
+        // Prefer learned but not mastered words
+        pool = pool.filter(p => learned[p.idx] && !mastered[p.idx]);
+        if (pool.length < 10) pool = words.map((w, i) => ({ word: w, idx: i }));
+    }
+
+    return pool;
+}
+
 function generateQuestion() {
     if (!words.length) return false;
 
+    const wordPool = getSmartWordPool();
+
     if (activeQuiz === 'example2word') {
-        const validWords = words.filter(w => w['例句'] && w['例句'].trim());
+        const validWords = wordPool.filter(p => p.word['例句'] && p.word['例句'].trim());
         if (validWords.length === 0) return false;
 
         for (let attempt = 0; attempt < 40; attempt++) {
-            const idx = Math.floor(Math.random() * validWords.length);
-            const w = validWords[idx];
+            const p = validWords[Math.floor(Math.random() * validWords.length)];
+            const w = p.word;
             const correct = w['单词'];
             const masked = maskExample(w['例句'], correct);
             const questionText = `
@@ -760,7 +1409,7 @@ function generateQuestion() {
             }
 
             currentQ = {
-                wordIndex: words.findIndex(wrd => wrd['单词'] === correct),
+                wordIndex: p.idx,
                 correct: correct,
                 options: shuffle(opts),
                 question: questionText,
@@ -773,8 +1422,8 @@ function generateQuestion() {
         return false;
     } else {
         for (let attempt = 0; attempt < 40; attempt++) {
-            const idx = Math.floor(Math.random() * words.length);
-            const w = words[idx];
+            const p = wordPool[Math.floor(Math.random() * wordPool.length)];
+            const w = p.word;
             let correct = '', question = '', opts = [];
 
             if (activeQuiz === 'word2meaning') {
@@ -789,7 +1438,7 @@ function generateQuestion() {
 
             if (opts.length >= 2) {
                 currentQ = {
-                    wordIndex: idx,
+                    wordIndex: p.idx,
                     correct,
                     options: shuffle(opts),
                     question,
@@ -807,6 +1456,15 @@ function checkAnswer(selectedRaw) {
     if (quizFeedback !== null) return;
     const isCorrect = (selectedRaw === currentQ.correct);
 
+    // Record quiz history for difficulty tracking
+    quizHistory.push({
+        wordIndex: currentQ.wordIndex,
+        mode: activeQuiz,
+        correct: isCorrect,
+        timestamp: Date.now()
+    });
+    if (quizHistory.length > 200) quizHistory.shift();
+
     if (isCorrect) {
         quizFeedback = { type: "feedback-correct", message: "🎉 回答正确！太棒了！" };
         playCorrectSound();
@@ -814,6 +1472,7 @@ function checkAnswer(selectedRaw) {
         if (currentQ.wordIndex !== undefined && currentQ.wordIndex !== -1) {
             learned[currentQ.wordIndex] = true;
             reviewRecord[currentQ.wordIndex] = Date.now();
+            recordLearned();
             saveData();
         }
     } else {
@@ -833,6 +1492,7 @@ function checkAnswer(selectedRaw) {
         if (mistakeBook.length > 150) mistakeBook.pop();
         saveData();
     }
+    checkAchievements();
     renderQuizUI();
 }
 
@@ -856,20 +1516,24 @@ function renderQuizUI() {
         'meaning2word': '🔤 含义选单词',
         'example2word': '📝 例句填空'
     };
+    const diffLabel = getSmartDifficulty();
+    const diffText = { easy: '简单', medium: '中等', hard: '困难' };
 
     let optsHtml = currentQ.options.map((opt, i) => {
         let extraClass = '';
         let onclickAttr = '';
+        let keyHint = '';
 
         if (isAnswered) {
             extraClass = 'disabled';
             if (opt === currentQ.correct) extraClass += ' correct';
         } else {
-            onclickAttr = `onclick='checkAnswer(${JSON.stringify(opt)})'`;
+            onclickAttr = `onclick="checkAnswer(${JSON.stringify(opt)})"`;
+            keyHint = `<span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:0.75rem; color:var(--text-muted); opacity:0.5;">${i + 1}</span>`;
         }
 
-        return `<div class="quiz-option ${extraClass}" ${onclickAttr} style="animation-delay:${i * 0.05}s">
-            ${escapeHtml(opt)}
+        return `<div class="quiz-option ${extraClass}" ${onclickAttr} style="animation-delay:${i * 0.05}s; position:relative; padding-left:36px;">
+            ${keyHint}${escapeHtml(opt)}
         </div>`;
     }).join('');
 
@@ -880,12 +1544,15 @@ function renderQuizUI() {
     <div class="card-base fade-in">
         <div class="home-corner" onclick="goHome()">🏠</div>
         <div class="quiz-header">
-            <div class="quiz-mode-badge">${modeLabels[activeQuiz] || '测验'}</div>
+            <div class="quiz-mode-badge">${modeLabels[activeQuiz] || '测验'} · ${diffText[diffLabel]}</div>
         </div>
         <div class="quiz-question">${currentQ.question}</div>
         <div class="quiz-options">${optsHtml}</div>
         ${fbHtml}
         ${nextBtnHtml}
+        <div style="font-size:0.75rem; color:var(--text-muted); text-align:center; margin-top:12px;">
+            ⌨️ 1-4 选择选项 · Enter 下一题 · Esc 返回首页
+        </div>
     </div>`;
 
     document.getElementById('main').innerHTML = html;
@@ -907,6 +1574,7 @@ function startQuiz(mode) {
     if (!generateQuestion()) { showToast("无法生成题目，请重试"); return; }
     currentView = "quiz";
     renderQuizUI();
+    recordStudy();
 }
 
 // ============================================
@@ -942,11 +1610,19 @@ function renderMistakePanel() {
             <div style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">题型：${modeLabels[m.mode] || m.mode}</div>
             <div class="mistake-item-wrong">❌ 你的答案：${escapeHtml(m.wrongAnswer)}</div>
             <div class="mistake-item-correct">✅ 正确答案：${escapeHtml(m.correctAnswer)}</div>
-            <div style="margin-top:10px;">
+            <div style="margin-top:10px; display:flex; gap:8px;">
                 <button class="btn btn-sm btn-secondary" onclick="retryMistake(${i})">🔄 重练此题</button>
+                <button class="btn btn-sm btn-ghost" onclick="removeMistake(${i})">🗑️ 移除</button>
             </div>
         </div>`;
     }).join('');
+}
+
+function removeMistake(idx) {
+    mistakeBook.splice(idx, 1);
+    saveData();
+    renderMistakePanel();
+    showToast("🗑️ 已移除该错题");
 }
 
 function clearAllMistake() {
@@ -993,6 +1669,7 @@ function retryMistake(idx) {
     currentView = "quiz";
     closePanels();
     renderQuizUI();
+    recordStudy();
 }
 
 function openMistakeReview() {
@@ -1012,6 +1689,9 @@ function renderStatPanel() {
     const diffCnt = difficult.length;
     const errCnt = mistakeBook.length;
     const rate = total > 0 ? (learnCnt / total * 100).toFixed(1) : 0;
+    const totalQuiz = quizHistory.length;
+    const correctQuiz = quizHistory.filter(q => q.correct).length;
+    const accuracy = totalQuiz > 0 ? (correctQuiz / totalQuiz * 100).toFixed(1) : 0;
 
     const html = `
         <div class="stat-row">
@@ -1038,9 +1718,33 @@ function renderStatPanel() {
             <span class="stat-row-label">📘 错题数量</span>
             <span class="stat-row-value" style="color:var(--danger);">${errCnt}</span>
         </div>
+        <div class="stat-row">
+            <span class="stat-row-label">📝 累计答题</span>
+            <span class="stat-row-value">${totalQuiz}</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-row-label">🎯 答题正确率</span>
+            <span class="stat-row-value" style="color:var(--success);">${accuracy}%</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-row-label">🔥 当前连续打卡</span>
+            <span class="stat-row-value" style="color:var(--warning);">${streakData.current} 天</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-row-label">🏆 最佳连续打卡</span>
+            <span class="stat-row-value" style="color:var(--warning);">${streakData.best} 天</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-row-label">⏱️ 累计学习时长</span>
+            <span class="stat-row-value">${Math.floor(studyTimer.totalSeconds / 60)} 分钟</span>
+        </div>
     `;
     document.getElementById('statContent').innerHTML = html;
+    renderTrendChart();
+    renderHeatmap();
+    renderWeakPointAnalysis();
 }
+
 
 // ============================================
 // Theme Sidebar
@@ -1065,6 +1769,99 @@ function initThemeSidebar() {
         </div>
     `).join('');
 }
+
+// ============================================
+// Keyboard Shortcuts
+// ============================================
+
+document.addEventListener('keydown', function(e) {
+    // Ignore if typing in input/textarea
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        if (e.key === 'Enter' && e.target.id === 'dictInput') {
+            checkDictation();
+        }
+        return;
+    }
+
+    if (e.key === 'Escape') {
+        e.preventDefault();
+        goHome();
+        return;
+    }
+
+    if (currentView === 'classic') {
+        if (e.key === ' ') {
+            e.preventDefault();
+            const word = classicList[classicIdx];
+            if (word) playWordAudio(word['单词']);
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            prevClassic();
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            nextClassic();
+        } else if (e.key === 'm' || e.key === 'M') {
+            e.preventDefault();
+            const word = classicList[classicIdx];
+            if (word) markMasterClassic(getRealIdx(word));
+        } else if (e.key === 'd' || e.key === 'D') {
+            e.preventDefault();
+            const word = classicList[classicIdx];
+            if (word) markDiffClassic(getRealIdx(word));
+        } else if (e.key === 'f' || e.key === 'F') {
+            e.preventDefault();
+            const word = classicList[classicIdx];
+            if (word) toggleFavClassic(getRealIdx(word));
+        }
+    }
+
+    if (currentView === 'quiz' && quizFeedback === null) {
+        const num = parseInt(e.key);
+        if (num >= 1 && num <= 4 && currentQ && currentQ.options[num - 1]) {
+            e.preventDefault();
+            checkAnswer(currentQ.options[num - 1]);
+        }
+    }
+
+    if (currentView === 'quiz' && quizFeedback !== null) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            nextQuiz();
+        }
+    }
+});
+
+// ============================================
+// Swipe Gestures (Mobile)
+// ============================================
+
+let touchStartX = 0;
+let touchStartY = 0;
+
+document.addEventListener('touchstart', function(e) {
+    touchStartX = e.changedTouches[0].screenX;
+    touchStartY = e.changedTouches[0].screenY;
+}, { passive: true });
+
+document.addEventListener('touchend', function(e) {
+    const touchEndX = e.changedTouches[0].screenX;
+    const touchEndY = e.changedTouches[0].screenY;
+    const diffX = touchStartX - touchEndX;
+    const diffY = touchStartY - touchEndY;
+
+    // Only handle horizontal swipes (not vertical scrolling)
+    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
+        if (currentView === 'classic') {
+            if (diffX > 0) {
+                // Swipe left -> next
+                nextClassic();
+            } else {
+                // Swipe right -> prev
+                prevClassic();
+            }
+        }
+    }
+}, { passive: true });
 
 // ============================================
 // Event Delegation & Bindings
@@ -1101,6 +1898,18 @@ document.getElementById('statBtn').onclick = () => {
     document.getElementById('overlay').classList.add('show');
 };
 
+document.getElementById('badgeBtn').onclick = () => {
+    renderBadgePanel();
+    document.getElementById('badgePanel').classList.add('open');
+    document.getElementById('overlay').classList.add('show');
+};
+
+document.getElementById('timerBtn').onclick = () => {
+    updateTimerDisplay();
+    document.getElementById('timerPanel').classList.add('open');
+    document.getElementById('overlay').classList.add('show');
+};
+
 document.getElementById('listBtn').onclick = () => renderWordList();
 document.getElementById('homeBtn').onclick = () => goHome();
 document.getElementById('reviewMistakesBtn').onclick = () => { closePanels(); openMistakeReview(); };
@@ -1109,6 +1918,7 @@ document.getElementById('reviewMistakesBtn').onclick = () => { closePanels(); op
 window.goHome = goHome;
 window.closePanels = closePanels;
 window.setTheme = setTheme;
+window.setDarkMode = setDarkMode;
 window.startClassic = startClassic;
 window.startQuiz = startQuiz;
 window.randomChallenge = randomChallenge;
@@ -1116,6 +1926,7 @@ window.openMistakeReview = openMistakeReview;
 window.checkAnswer = checkAnswer;
 window.nextQuiz = nextQuiz;
 window.retryMistake = retryMistake;
+window.removeMistake = removeMistake;
 window.playWordAudio = playWordAudio;
 window.readExampleSentence = readExampleSentence;
 window.jumpToWord = jumpToWord;
@@ -1127,6 +1938,17 @@ window.toggleMeanMask = toggleMeanMask;
 window.toggleTransMask = toggleTransMask;
 window.doSearch = doSearch;
 window.clearAllMistake = clearAllMistake;
+window.exportData = exportData;
+window.importData = importData;
+window.showImportPanel = showImportPanel;
+window.toggleTimer = toggleTimer;
+window.resetTimer = resetTimer;
+window.setTimerDuration = setTimerDuration;
+window.batchMaster = batchMaster;
+window.batchRemoveFav = batchRemoveFav;
+window.clearBatchSelection = clearBatchSelection;
+window.toggleListSelection = toggleListSelection;
+window.showDictHint = showDictHint;
 
 // ============================================
 // Word Data Loading
@@ -1171,6 +1993,7 @@ async function loadWords() {
     applyTheme(parseInt(savedTheme));
     refreshParticles();
     renderHome();
+    checkAchievements();
     showToast(`🎉 欢迎回来！已加载 ${words.length} 个单词`);
 }
 

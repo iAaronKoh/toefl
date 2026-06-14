@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>TOEFL 单词记忆</title>
+    <title>TOEFL 单词记忆大师 | 2026 增强版</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <svg width="0" height="0" style="position:absolute;">
@@ -29,6 +29,8 @@
             <div class="header-actions">
                 <button class="icon-btn" id="statBtn" title="学习统计"><span>📊</span></button>
                 <button class="icon-btn" id="listBtn" title="单词列表"><span>📋</span></button>
+                <button class="icon-btn" id="timerBtn" title="番茄钟"><span>⏱️</span></button>
+                <button class="icon-btn" id="badgeBtn" title="成就徽章"><span>🏆</span></button>
                 <button class="icon-btn" id="settingBtn" title="设置"><span>⚙️</span></button>
                 <button class="icon-btn" id="themeToggleBtn" title="切换主题"><span>🎨</span></button>
                 <button class="icon-btn" id="mistakeBtn" title="错题本">
@@ -42,14 +44,24 @@
 
     <main class="main" id="main"></main>
 
+    <!-- Theme Panel -->
     <div class="side-panel" id="themePanel">
         <div class="panel-header">
             <h3>🎨 主题风格</h3>
             <button class="panel-close" onclick="closePanels()">✕</button>
         </div>
         <div id="themeList"></div>
+        <div class="setting-card" style="margin-top:16px;">
+            <p>🌙 深色模式</p>
+            <div class="action-group">
+                <button class="btn btn-sm btn-secondary" onclick="setDarkMode('auto')">跟随系统</button>
+                <button class="btn btn-sm btn-secondary" onclick="setDarkMode('light')">浅色</button>
+                <button class="btn btn-sm btn-secondary" onclick="setDarkMode('dark')">深色</button>
+            </div>
+        </div>
     </div>
 
+    <!-- Mistake Panel -->
     <div class="side-panel" id="mistakePanel">
         <div class="panel-header">
             <h3>📘 错题本</h3>
@@ -60,6 +72,7 @@
         <button class="btn btn-ghost btn-sm" onclick="clearAllMistake()" style="width:100%; margin-top:8px;">🗑️ 清空错题</button>
     </div>
 
+    <!-- Setting Panel -->
     <div class="side-panel" id="settingPanel">
         <div class="panel-header">
             <h3>⚙️ 系统设置</h3>
@@ -81,14 +94,147 @@
                 <button class="btn btn-sm btn-secondary" onclick="setSpeechRate(1.1)">快速</button>
             </div>
         </div>
+        <div class="setting-card">
+            <p>💾 数据管理</p>
+            <div class="action-group" style="flex-direction:column;">
+                <button class="btn btn-sm btn-secondary" onclick="exportData()" style="width:100%;">📤 导出学习数据</button>
+                <button class="btn btn-sm btn-secondary" onclick="showImportPanel()" style="width:100%; margin-top:8px;">📥 导入学习数据</button>
+            </div>
+        </div>
+        <div class="setting-card">
+            <p>⌨️ 快捷键</p>
+            <div class="shortcuts-list">
+                <div class="shortcut-row">
+                    <span class="shortcut-desc">播放发音</span>
+                    <span class="shortcut-key"><kbd>Space</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span class="shortcut-desc">上一个单词</span>
+                    <span class="shortcut-key"><kbd>←</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span class="shortcut-desc">下一个单词</span>
+                    <span class="shortcut-key"><kbd>→</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span class="shortcut-desc">标记掌握</span>
+                    <span class="shortcut-key"><kbd>M</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span class="shortcut-desc">标记难词</span>
+                    <span class="shortcut-key"><kbd>D</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span class="shortcut-desc">收藏/取消</span>
+                    <span class="shortcut-key"><kbd>F</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span class="shortcut-desc">测验选项</span>
+                    <span class="shortcut-key"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span class="shortcut-desc">下一题</span>
+                    <span class="shortcut-key"><kbd>Enter</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span class="shortcut-desc">返回首页</span>
+                    <span class="shortcut-key"><kbd>Esc</kbd></span>
+                </div>
+            </div>
+        </div>
     </div>
 
+    <!-- Statistics Panel -->
     <div class="side-panel" id="statPanel">
         <div class="panel-header">
             <h3>📊 学习统计</h3>
             <button class="panel-close" onclick="closePanels()">✕</button>
         </div>
         <div id="statContent" class="stat-board"></div>
+        <div class="chart-container">
+            <div class="chart-title">📈 近7天学习趋势</div>
+            <div class="trend-chart" id="trendChart"></div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title">🔥 学习热力图 (近30天)</div>
+            <div class="heatmap-container" id="heatmapChart"></div>
+            <div class="heatmap-legend">
+                <span>少</span>
+                <div class="heatmap-legend-box" style="background:rgba(37,99,235,0.1)"></div>
+                <div class="heatmap-legend-box" style="background:rgba(37,99,235,0.3)"></div>
+                <div class="heatmap-legend-box" style="background:rgba(37,99,235,0.5)"></div>
+                <div class="heatmap-legend-box" style="background:rgba(37,99,235,0.7)"></div>
+                <div class="heatmap-legend-box" style="background:rgba(37,99,235,0.9)"></div>
+                <span>多</span>
+            </div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title">⚠️ 薄弱点分析</div>
+            <div id="weakPointAnalysis"></div>
+        </div>
+    </div>
+
+    <!-- Badge/Achievement Panel -->
+    <div class="side-panel" id="badgePanel">
+        <div class="panel-header">
+            <h3>🏆 成就徽章</h3>
+            <button class="panel-close" onclick="closePanels()">✕</button>
+        </div>
+        <div id="badgeContent" class="badge-grid"></div>
+    </div>
+
+    <!-- Timer/Pomodoro Panel -->
+    <div class="side-panel" id="timerPanel">
+        <div class="panel-header">
+            <h3>⏱️ 番茄钟</h3>
+            <button class="panel-close" onclick="closePanels()">✕</button>
+        </div>
+        <div class="timer-display">
+            <div class="timer-circle" id="timerDisplay">25:00</div>
+            <div class="timer-label" id="timerLabel">专注学习</div>
+            <div class="action-group" style="justify-content:center;">
+                <button class="btn btn-primary" id="timerStartBtn" onclick="toggleTimer()">▶ 开始</button>
+                <button class="btn btn-secondary" onclick="resetTimer()">🔄 重置</button>
+            </div>
+        </div>
+        <div class="setting-card">
+            <p>⏰ 计时设置</p>
+            <div class="action-group">
+                <button class="btn btn-sm btn-secondary" onclick="setTimerDuration(15)">15分钟</button>
+                <button class="btn btn-sm btn-secondary" onclick="setTimerDuration(25)">25分钟</button>
+                <button class="btn btn-sm btn-secondary" onclick="setTimerDuration(45)">45分钟</button>
+            </div>
+        </div>
+        <div class="stat-board" style="margin-top:16px;">
+            <div class="stat-row">
+                <span class="stat-row-label">📚 今日学习时长</span>
+                <span class="stat-row-value" id="todayStudyTime">0分钟</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-row-label">🍅 完成番茄数</span>
+                <span class="stat-row-value" id="completedPomodoros">0</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-row-label">⏳ 累计学习时长</span>
+                <span class="stat-row-value" id="totalStudyTime">0分钟</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Data Panel -->
+    <div class="side-panel" id="importPanel">
+        <div class="panel-header">
+            <h3>📥 导入数据</h3>
+            <button class="panel-close" onclick="closePanels()">✕</button>
+        </div>
+        <div class="import-export-area">
+            <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:8px;">粘贴之前导出的JSON数据：</p>
+            <textarea id="importDataArea" placeholder="在此粘贴JSON数据..."></textarea>
+            <div class="action-group" style="margin-top:12px;">
+                <button class="btn btn-primary" onclick="importData()" style="flex:1;">✅ 确认导入</button>
+                <button class="btn btn-ghost" onclick="closePanels()" style="flex:1;">取消</button>
+            </div>
+        </div>
     </div>
 
     <script src="app.js"></script>

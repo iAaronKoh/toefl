@@ -1343,7 +1343,11 @@ function startSmartReview() {
 
 function maskExample(sentence, target) {
     if (!sentence || !target) return sentence;
-    const escapedTarget = target.replace(/[.*+?^${}()|[\]\]/g, '\$&');
+    // 原代码
+    // const escapedTarget = target.replace(/[.*+?^${}()|[\]\]/g, '\$&');
+    
+    // 修复后：确保 ] 被正确转义
+    const escapedTarget = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`(${escapedTarget})`, 'gi');
     return sentence.replace(regex, '______');
 }

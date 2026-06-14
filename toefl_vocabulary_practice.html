@@ -1266,11 +1266,134 @@
                 updateStats();
                 renderWord();
                 showToast('📚 已加载 ' + words.length + ' 个单词');
-            } catch (e) {
+                    // ==================== 初始化 ====================
+                    async function init() {
+                        // 加载保存的主题
+                        setTheme(theme, false);
+            
+                        // 创建粒子背景
+                        createParticles();
+            
+                        // 加载单词数据 - 支持多种路径和错误处理
+                        const jsonPaths = [
+                            'toefl_vocabulary.json',
+                            './toefl_vocabulary.json',
+                            '../toefl_vocabulary.json',
+                            'data/toefl_vocabulary.json',
+                            '/toefl_vocabulary.json'
+                        ];
+            
+                        let loadSuccess = false;
+                        let lastError = null;
+            
+                        for (const path of jsonPaths) {
+                            try {
+                                const response = await fetch(path, { 
+                                    method: 'GET',
+                                    cache: 'no-cache'
+                                });
+                                if (response.ok) {
+                                    words = await response.json();
+                                    loadSuccess = true;
+                                    console.log('✅ JSON加载成功:', path);
+                                    break;
+                                }
+                            } catch (e) {
+                                lastError = e;
+                                console.log('⚠️ 路径失败:', path, e.message);
+                                continue;
+                            }
+                        }
+            
+                        if (!loadSuccess) {
+                            console.error('❌ 所有JSON路径均失败:', lastError);
+                            showToast('❌ 无法加载单词数据，请确保 toefl_vocabulary.json 文件存在');
+                            // 显示手动加载提示
+                            showManualLoadPrompt();
+                            return;
+                        }
+            
+                        // 修复点：移除孤立的 catch 块，直接执行后续逻辑
+                        // 恢复上次位置
+                        const savedIndex = Storage.get('currentIndex');
+                        if (savedIndex && savedIndex < words.length) {
+                            currentIndex = savedIndex;
+                        }
+            
+                        // 随机模式打乱
+                        if (currentMode === 'shuffle') {
+                            shuffleWords();
+                        }
+            
+                        updateStats();
+                        renderWord();
+                        showToast('📚 已加载 ' + words.length + ' 个单词');
+                    }
                 showToast('❌ 加载单词失败，请检查文件');
                 console.error(e);
             }
-        }
+                // ==================== 初始化 ====================
+                async function init() {
+                    // 加载保存的主题
+                    setTheme(theme, false);
+        
+                    // 创建粒子背景
+                    createParticles();
+        
+                    // 加载单词数据 - 支持多种路径和错误处理
+                    const jsonPaths = [
+                        'toefl_vocabulary.json',
+                        './toefl_vocabulary.json',
+                        '../toefl_vocabulary.json',
+                        'data/toefl_vocabulary.json',
+                        '/toefl_vocabulary.json'
+                    ];
+        
+                    let loadSuccess = false;
+                    let lastError = null;
+        
+                    for (const path of jsonPaths) {
+                        try {
+                            const response = await fetch(path, { 
+                                method: 'GET',
+                                cache: 'no-cache'
+                            });
+                            if (response.ok) {
+                                words = await response.json();
+                                loadSuccess = true;
+                                console.log('✅ JSON加载成功:', path);
+                                break;
+                            }
+                        } catch (e) {
+                            lastError = e;
+                            console.log('⚠️ 路径失败:', path, e.message);
+                            continue;
+                        }
+                    }
+        
+                    if (!loadSuccess) {
+                        console.error('❌ 所有JSON路径均失败:', lastError);
+                        showToast('❌ 无法加载单词数据，请确保 toefl_vocabulary.json 文件存在');
+                        // 显示手动加载提示
+                        showManualLoadPrompt();
+                        return;
+                    }
+        
+                    // 恢复上次位置
+                    const savedIndex = Storage.get('currentIndex');
+                    if (savedIndex && savedIndex < words.length) {
+                        currentIndex = savedIndex;
+                    }
+        
+                    // 随机模式打乱
+                    if (currentMode === 'shuffle') {
+                        shuffleWords();
+                    }
+        
+                    updateStats();
+                    renderWord();
+                    showToast('📚 已加载 ' + words.length + ' 个单词');
+                }
 
         // ==================== 粒子背景 ====================
         function createParticles() {

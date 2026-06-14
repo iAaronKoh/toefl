@@ -865,7 +865,7 @@ function renderQuizUI() {
             extraClass = 'disabled';
             if (opt === currentQ.correct) extraClass += ' correct';
         } else {
-            onclickAttr = `onclick="checkAnswer(${JSON.stringify(opt)})"`;
+            onclickAttr = `onclick='checkAnswer(${JSON.stringify(opt)})'`;
         }
 
         return `<div class="quiz-option ${extraClass}" ${onclickAttr} style="animation-delay:${i * 0.05}s">

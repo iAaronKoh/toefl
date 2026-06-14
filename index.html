@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>TOEFL 单词记忆大师 | 外部词库 + 经典模式修复</title>
+    <title>TOEFL 单词记忆大师 | 扩大发音区域 + 首页按钮置顶</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -36,8 +36,12 @@
         .mode-emoji { font-size: 48px; margin-bottom: 12px; }
         .mode-title { font-weight: 700; font-size: 1.2rem; margin-bottom: 6px; color: var(--primary); }
         .mode-desc { font-size: 12px; opacity: 0.7; }
-        .word-card { background: var(--card); border-radius: 32px; margin: 16px; padding: 24px; box-shadow: var(--shadow); }
-        .word-title { font-size: 2rem; font-weight: 700; color: var(--primary); word-break: break-word; }
+        /* 卡片样式（含左上角返回按钮） */
+        .word-card, .quiz-card { background: var(--card); border-radius: 32px; margin: 16px; padding: 24px; box-shadow: var(--shadow); position: relative; }
+        .home-corner { position: absolute; top: 16px; left: 16px; font-size: 24px; cursor: pointer; background: var(--bg); width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: 0.2s; z-index: 10; }
+        .home-corner:hover { background: var(--primary); color: white; transform: scale(0.95); }
+        .word-title { font-size: 2rem; font-weight: 700; color: var(--primary); word-break: break-word; cursor: pointer; display: inline-block; transition: 0.1s; }
+        .word-title:active { transform: scale(0.98); }
         .word-phonetic { font-size: 0.9rem; color: var(--secondary); margin-top: 4px; }
         .meaning-box { background: rgba(0,0,0,0.02); border-radius: 20px; padding: 16px; margin: 16px 0; border-left: 4px solid var(--accent); }
         .meaning-text { font-size: 1.2rem; font-weight: 500; }
@@ -50,15 +54,16 @@
         .btn-secondary { background: var(--bg); color: var(--primary); border: 1px solid var(--primary); }
         .btn-danger { background: #e74c3c; color: white; }
         .btn-success { background: #2ecc71; color: white; }
-        .quiz-card { background: var(--card); border-radius: 40px; margin: 16px; padding: 28px 20px; box-shadow: var(--shadow); }
         .quiz-question { font-size: 1.4rem; font-weight: 600; text-align: center; margin-bottom: 28px; color: var(--primary); line-height: 1.4; }
         .quiz-options { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
-        .quiz-option { background: var(--bg); border-radius: 60px; padding: 14px 20px; text-align: center; font-weight: 500; cursor: pointer; border: 2px solid transparent; }
-        .quiz-option:hover { background: var(--secondary); color: white; }
+        .quiz-option { background: var(--bg); border-radius: 60px; padding: 14px 20px; text-align: center; font-weight: 500; cursor: pointer; border: 2px solid transparent; transition: 0.15s; }
+        .quiz-option:hover:not(.disabled) { background: var(--secondary); color: white; }
+        .quiz-option.disabled { opacity: 0.6; cursor: not-allowed; }
         .quiz-option.selected { background: var(--primary); color: white; }
         .quiz-feedback { text-align: center; padding: 12px; border-radius: 40px; margin: 16px 0; }
         .feedback-correct { background: rgba(46,204,113,0.2); color: #2ecc71; }
         .feedback-wrong { background: rgba(231,76,60,0.2); color: #e74c3c; }
+        .next-btn-container { display: flex; justify-content: center; margin-top: 20px; }
         .side-panel { position: fixed; top: 0; right: -100%; width: 80%; max-width: 340px; height: 100vh; background: var(--card); z-index: 2000; transition: 0.3s; overflow-y: auto; padding: 20px; }
         .side-panel.open { right: 0; }
         .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1500; opacity: 0; visibility: hidden; transition: 0.2s; }
@@ -88,30 +93,26 @@
 <div class="side-panel" id="mistakePanel"><div style="display:flex; justify-content:space-between;"><h3>📘 错题本</h3><button onclick="closePanels()" style="background:none; border:none; font-size:24px;">✕</button></div><div id="mistakeListContainer"></div><button class="btn btn-primary" id="reviewMistakesBtn" style="width:100%; margin-top:16px;">📖 开始错题复习</button></div>
 
 <script>
-    // ======================= 全局变量 =======================
-    let words = [];             // 从外部加载的原始单词数组
-    let currentView = "home";  // home, classic, quiz
-    let classicList = [];       // 经典模式当前使用的单词列表
-    let classicIdx = 0;         // 当前索引
-    let favorites = [];         // 存储原始索引
+    // ---------- 全局数据 ----------
+    let words = [];
+    let currentView = "home";
+    let classicList = [];
+    let classicIdx = 0;
+    let favorites = [];
     let difficult = [];
     let learned = {};
     let mastered = {};
     let mistakeBook = [];
     
-    // 测验相关
     let activeQuiz = null;
     let currentQ = null;
-    let selectedOpt = null;
     let quizFeedback = null;
     
-    // 存储key
     const STORAGE = {
         fav: 'tf_fav', diff: 'tf_diff', learned: 'tf_learn', mastered: 'tf_master',
         mistakes: 'tf_mistakes', cidx: 'tf_cidx', theme: 'tf_theme'
     };
     
-    // ======================= 辅助函数 =======================
     function saveData() {
         localStorage.setItem(STORAGE.fav, JSON.stringify(favorites));
         localStorage.setItem(STORAGE.diff, JSON.stringify(difficult));
@@ -131,9 +132,48 @@
     }
     function showToast(msg) { let t = document.getElementById('toast'); t.innerText = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2000); }
     function closePanels() { document.querySelectorAll('.side-panel').forEach(p=>p.classList.remove('open')); document.getElementById('overlay').classList.remove('show'); }
-    function escapeHtml(str) { if (!str) return ''; return String(str).replace(/[&<>]/g, m=> m==='&'?'&amp;' : m==='<'?'&lt;' : '&gt;'); }
+    function escapeHtml(str) { if (!str) return ''; return String(str).replace(/[&<>]/g, m=> m==='&'?'&amp;': m==='<'?'&lt;': '&gt;'); }
     
-    // ======================= 主题系统 =======================
+    // 音效
+    let audioCtx = null;
+    function playCorrectSound() {
+        try {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.frequency.value = 880;
+            gain.gain.value = 0.3;
+            osc.type = 'sine';
+            osc.start();
+            gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.5);
+            osc.stop(audioCtx.currentTime + 0.5);
+        } catch(e) { console.warn("音效失败", e); }
+    }
+    function playWrongSound() {
+        try {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.frequency.value = 440;
+            gain.gain.value = 0.3;
+            osc.type = 'sawtooth';
+            osc.start();
+            gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.3);
+            osc.stop(audioCtx.currentTime + 0.3);
+        } catch(e) { console.warn("音效失败", e); }
+    }
+    
+    // 发音函数（可被点击标题调用）
+    function playWordAudio(word) {
+        if (!word) return;
+        new Audio(`https://dict.youdao.com/dictvoice?type=2&audio=${encodeURIComponent(word)}`).play().catch(()=>showToast("发音失败"));
+    }
+    
+    // 主题
     function applyTheme(id) {
         const root = document.documentElement;
         for (let i=1;i<=5;i++) {
@@ -172,7 +212,6 @@
         }
     }
     
-    // ======================= 视图调度 =======================
     function renderCurrentView() {
         if (currentView === 'home') renderHome();
         else if (currentView === 'classic') renderClassic();
@@ -206,44 +245,46 @@
         currentView = "home";
     }
     
-    // ========== 经典模式（完全修复边界问题） ==========
+    // ========== 经典模式 ==========
+    let classicContainer = null;
     function startClassic() {
-        if (!words.length) { showToast("单词库未加载完成"); return; }
-        classicList = [...words];  // 重新复制，避免污染
-        // 确保索引有效
+        if (!words.length) { showToast("单词库未加载"); return; }
+        classicList = [...words];
         if (classicIdx >= classicList.length) classicIdx = 0;
         if (classicIdx < 0) classicIdx = 0;
         currentView = "classic";
-        renderClassic();
+        const mainEl = document.getElementById('main');
+        mainEl.innerHTML = `<div class="word-card" id="classicCard"></div>`;
+        classicContainer = document.getElementById('classicCard');
+        updateClassicContent();
     }
-    
     function getRealIdx(wordObj) {
         if (!wordObj || !wordObj['单词']) return -1;
         return words.findIndex(w => w['单词'] === wordObj['单词']);
     }
-    
-    function renderClassic() {
-        // 防御性检查
-        if (!classicList.length) { startClassic(); return; }
-        if (classicIdx < 0 || classicIdx >= classicList.length) classicIdx = 0;
+    function updateClassicContent() {
+        if (!classicList.length || classicIdx < 0 || classicIdx >= classicList.length) {
+            classicIdx = 0;
+            if (!classicList.length) return;
+        }
         const word = classicList[classicIdx];
         if (!word || !word['单词']) {
-            console.warn("单词数据无效，重新初始化经典列表");
             classicList = [...words];
-            if (classicList.length) renderClassic();
-            else showToast("数据错误");
+            if (!classicList.length) return;
+            classicIdx = 0;
+            updateClassicContent();
             return;
         }
         const realIdx = getRealIdx(word);
         const isFav = realIdx !== -1 && favorites.includes(realIdx);
         const isDiff = realIdx !== -1 && difficult.includes(realIdx);
         const isMaster = realIdx !== -1 && mastered[realIdx];
-        
+        // 左上角返回首页按钮 + 单词标题可点击发音
         const html = `
-        <div class="word-card">
-            <div style="display:flex; justify-content:space-between; flex-wrap:wrap;">
-                <div><div class="word-title">${escapeHtml(word['单词'])}</div><div class="word-phonetic">/${escapeHtml(word['读音'] || '未知')}/</div></div>
-                <div><button class="icon-btn" onclick="toggleFav(${realIdx})">${isFav ? '⭐' : '☆'}</button><button class="icon-btn" onclick="playAudio('${escapeHtml(word['单词'])}')">🔊</button></div>
+            <div class="home-corner" onclick="goHome()">🏠</div>
+            <div style="display:flex; justify-content:space-between; flex-wrap:wrap; margin-top: 20px;">
+                <div><div class="word-title" onclick="playWordAudio('${escapeHtml(word['单词'])}')">${escapeHtml(word['单词'])}</div><div class="word-phonetic">/${escapeHtml(word['读音'] || '未知')}/</div></div>
+                <div><button class="icon-btn" onclick="toggleFavClassic(${realIdx})">${isFav ? '⭐' : '☆'}</button><button class="icon-btn" onclick="playWordAudio('${escapeHtml(word['单词'])}')">🔊</button></div>
             </div>
             <div class="meaning-box"><div class="meaning-text">${escapeHtml(word['单词中文意思'] || '暂无释义')}</div></div>
             ${word['记忆方法'] ? `<div class="memory-card">💡 记忆法：${escapeHtml(word['记忆方法'])}</div>` : ''}
@@ -252,23 +293,21 @@
             <div>${isDiff ? '<span class="tag">🤔 难词</span>' : ''}${isMaster ? '<span class="tag">✅ 已掌握</span>' : ''}</div>
             <div class="action-group">
                 <button class="btn btn-secondary" onclick="prevClassic()">◀ 上一个</button>
-                <button class="btn btn-danger" onclick="markDiff(${realIdx})">🤔 难词</button>
-                <button class="btn btn-success" onclick="markMaster(${realIdx})">✅ 掌握</button>
+                <button class="btn btn-danger" onclick="markDiffClassic(${realIdx})">🤔 难词</button>
+                <button class="btn btn-success" onclick="markMasterClassic(${realIdx})">✅ 掌握</button>
                 <button class="btn btn-primary" onclick="nextClassic()">下一个 ▶</button>
             </div>
-        </div>`;
-        document.getElementById('main').innerHTML = html;
+        `;
+        if (classicContainer) classicContainer.innerHTML = html;
         saveData();
     }
+    window.toggleFavClassic = function(idx) { if (idx===-1) return; let p = favorites.indexOf(idx); p===-1 ? favorites.push(idx) : favorites.splice(p,1); saveData(); updateClassicContent(); };
+    window.markDiffClassic = function(idx) { if (idx===-1) return; let p = difficult.indexOf(idx); p===-1 ? difficult.push(idx) : difficult.splice(p,1); saveData(); updateClassicContent(); };
+    window.markMasterClassic = function(idx) { if (idx===-1) return; mastered[idx]=true; learned[idx]=true; difficult = difficult.filter(i=>i!==idx); saveData(); updateClassicContent(); setTimeout(()=>nextClassic(),600); };
+    window.prevClassic = function() { if (!classicList.length) return; classicIdx--; if (classicIdx < 0) classicIdx = classicList.length-1; updateClassicContent(); };
+    window.nextClassic = function() { if (!classicList.length) return; classicIdx++; if (classicIdx >= classicList.length) classicIdx = 0; updateClassicContent(); saveData(); };
     
-    window.toggleFav = function(idx) { if(idx===-1) return; let p = favorites.indexOf(idx); p===-1 ? favorites.push(idx) : favorites.splice(p,1); saveData(); renderClassic(); };
-    window.markDiff = function(idx) { if(idx===-1) return; let p = difficult.indexOf(idx); p===-1 ? difficult.push(idx) : difficult.splice(p,1); saveData(); renderClassic(); };
-    window.markMaster = function(idx) { if(idx===-1) return; mastered[idx]=true; learned[idx]=true; difficult = difficult.filter(i=>i!==idx); saveData(); renderClassic(); setTimeout(()=>nextClassic(),600); };
-    window.prevClassic = function() { if(!classicList.length) return; classicIdx--; if(classicIdx < 0) classicIdx = classicList.length-1; renderClassic(); };
-    window.nextClassic = function() { if(!classicList.length) return; classicIdx++; if(classicIdx >= classicList.length) classicIdx = 0; renderClassic(); saveData(); };
-    window.playAudio = function(w) { new Audio(`https://dict.youdao.com/dictvoice?type=2&audio=${encodeURIComponent(w)}`).play().catch(()=>showToast("发音失败")); };
-    
-    // ========== 测验模块 (保留例句填空功能) ==========
+    // ========== 测验模块 ==========
     function startQuiz(mode) {
         if (!words.length) return;
         activeQuiz = mode;
@@ -312,42 +351,55 @@
                 if (opts.length<4) opts = [correct, "phenomenon", "analyze", "significant"].slice(0,4);
             }
             currentQ = { wordIndex: idx, correct, options: shuffle(opts), question, mode: activeQuiz };
-            selectedOpt = null;
             quizFeedback = null;
             return;
         }
         showToast("生成题目失败");
     }
     function shuffle(arr) { for(let i=arr.length-1;i>0;i--){ let j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
-    function renderQuizUI() {
-        if (!currentQ) { generateQuestion(); if(!currentQ) return; }
-        let optsHtml = currentQ.options.map(opt => `<div class="quiz-option" data-val="${escapeHtml(opt)}" onclick="selectOpt('${escapeHtml(opt)}')">${escapeHtml(opt)}</div>`).join('');
-        let fbHtml = quizFeedback ? `<div class="quiz-feedback ${quizFeedback.type}">${quizFeedback.message}</div>` : '';
-        let actionBtn = quizFeedback ? `<button class="btn btn-primary" onclick="nextQuiz()">下一题 ▶</button>` : `<button class="btn btn-primary" onclick="submitQuiz()">提交答案</button>`;
-        let html = `<div class="quiz-card"><div class="quiz-question">${currentQ.question}</div><div class="quiz-options">${optsHtml}</div>${fbHtml}<div style="display:flex; gap:12px;">${actionBtn}<button class="btn btn-secondary" onclick="goHome()">🏠 首页</button></div></div>`;
-        document.getElementById('main').innerHTML = html;
-        if (selectedOpt) document.querySelectorAll('.quiz-option').forEach(el => { if(el.dataset.val === selectedOpt) el.classList.add('selected'); });
-    }
-    window.selectOpt = function(opt) { selectedOpt = opt; renderQuizUI(); };
-    window.submitQuiz = function() {
-        if (!selectedOpt) { showToast("请选择一个选项"); return; }
-        let isCorrect = (selectedOpt === currentQ.correct);
+    
+    function checkAnswer(selected) {
+        if (quizFeedback !== null) return;
+        const isCorrect = (selected === currentQ.correct);
         if (isCorrect) {
-            quizFeedback = { type:"feedback-correct", message:"✅ 正确！很棒！" };
-            showToast("回答正确");
+            quizFeedback = { type: "feedback-correct", message: "✅ 正确！很棒！" };
+            playCorrectSound();
+            showToast("✓ 正确");
         } else {
-            quizFeedback = { type:"feedback-wrong", message:`❌ 错误！正确答案：${escapeHtml(currentQ.correct)}` };
-            mistakeBook.unshift({ wordIndex: currentQ.wordIndex, mode: activeQuiz, wrongAnswer: selectedOpt, correctAnswer: currentQ.correct, timestamp: Date.now() });
+            quizFeedback = { type: "feedback-wrong", message: `❌ 错误！正确答案：${escapeHtml(currentQ.correct)}` };
+            playWrongSound();
+            showToast("✗ 错误，已加入错题本");
+            mistakeBook.unshift({ wordIndex: currentQ.wordIndex, mode: activeQuiz, wrongAnswer: selected, correctAnswer: currentQ.correct, timestamp: Date.now() });
             if (mistakeBook.length > 150) mistakeBook.pop();
             saveData();
-            showToast("已加入错题本");
         }
         renderQuizUI();
-    };
-    window.nextQuiz = function() { generateQuestion(); renderQuizUI(); };
-    window.randomChallenge = function() { let modes = ["word2meaning","meaning2word","example2word"]; startQuiz(modes[Math.floor(Math.random()*3)]); };
+    }
     
-    // ========== 错题本 ==========
+    function renderQuizUI() {
+        if (!currentQ) { generateQuestion(); if(!currentQ) return; }
+        const isAnswered = (quizFeedback !== null);
+        let optsHtml = currentQ.options.map(opt => {
+            let disabledClass = isAnswered ? 'disabled' : '';
+            let onclickAttr = isAnswered ? '' : `onclick="checkAnswer('${escapeHtml(opt)}')"`;
+            return `<div class="quiz-option ${disabledClass}" ${onclickAttr}>${escapeHtml(opt)}</div>`;
+        }).join('');
+        let fbHtml = quizFeedback ? `<div class="quiz-feedback ${quizFeedback.type}">${quizFeedback.message}</div>` : '';
+        let nextBtnHtml = isAnswered ? `<div class="next-btn-container"><button class="btn btn-primary" onclick="nextQuiz()">下一题 ▶</button></div>` : '';
+        let html = `<div class="quiz-card">
+            <div class="home-corner" onclick="goHome()">🏠</div>
+            <div class="quiz-question" style="margin-top: 20px;">${currentQ.question}</div>
+            <div class="quiz-options">${optsHtml}</div>
+            ${fbHtml}
+            ${nextBtnHtml}
+        </div>`;
+        document.getElementById('main').innerHTML = html;
+    }
+    
+    function nextQuiz() { generateQuestion(); renderQuizUI(); }
+    function randomChallenge() { let modes = ["word2meaning","meaning2word","example2word"]; startQuiz(modes[Math.floor(Math.random()*3)]); }
+    
+    // 错题本
     function renderMistakePanel() {
         let container = document.getElementById('mistakeListContainer');
         if (!mistakeBook.length) { container.innerHTML = '<div style="text-align:center;padding:32px;">📭 暂无错题</div>'; return; }
@@ -359,7 +411,7 @@
             <button class="btn btn-secondary" style="margin-top:8px; padding:6px 12px;" onclick="retryMistake(${i})">重练此题</button></div>`;
         }).join('');
     }
-    window.retryMistake = function(idx) {
+    function retryMistake(idx) {
         let m = mistakeBook[idx];
         if (!m || !words[m.wordIndex]) { showToast("错题失效"); return; }
         activeQuiz = m.mode;
@@ -384,66 +436,55 @@
             if (opts.length<4) opts=[correct,"significant","approach","context"];
         }
         currentQ = { wordIndex: m.wordIndex, correct, options: shuffle(opts), question, mode: m.mode };
-        selectedOpt = null; quizFeedback = null; currentView = "quiz"; closePanels(); renderQuizUI();
-    };
-    window.openMistakeReview = function() { if (!mistakeBook.length) { showToast("暂无错题"); return; } retryMistake(0); };
+        quizFeedback = null;
+        currentView = "quiz";
+        closePanels();
+        renderQuizUI();
+    }
+    function openMistakeReview() { if (!mistakeBook.length) { showToast("暂无错题"); return; } retryMistake(0); }
     
     function goHome() { renderHome(); currentView = "home"; saveData(); }
     
-    // 主题侧边栏
     function initThemeSidebar() {
         let themes = [{id:1,name:"深海蓝"},{id:2,name:"暮光紫"},{id:3,name:"森林绿"},{id:4,name:"暖阳橙"},{id:5,name:"暗夜黑"}];
         document.getElementById('themeList').innerHTML = themes.map(t => `<div class="mode-card" style="margin-bottom:12px; padding:12px; display:flex; gap:12px;" onclick="setTheme(${t.id})"><div style="font-size:28px;">${t.id===1?"🌊":t.id===2?"🔮":t.id===3?"🌲":t.id===4?"☀️":"🌙"}</div><div><strong>${t.name}</strong></div></div>`).join('');
     }
     
-    // ======================= 加载外部 JSON =======================
     async function loadWords() {
-        // 尝试多个路径，确保能找到文件
-        const paths = [
-            'toefl_vocabulary.json',
-            './toefl_vocabulary.json',
-            '../toefl_vocabulary.json',
-            'data/toefl_vocabulary.json'
-        ];
+        const paths = ['toefl_vocabulary.json', './toefl_vocabulary.json', '../toefl_vocabulary.json', 'data/toefl_vocabulary.json'];
         let loaded = false;
         for (let p of paths) {
             try {
-                const res = await fetch(p, { cache: 'no-store' });
+                let res = await fetch(p, { cache: 'no-store' });
                 if (res.ok) {
                     words = await res.json();
                     loaded = true;
-                    console.log(`✅ 成功加载单词库: ${p}，共 ${words.length} 个单词`);
+                    console.log(`✅ 加载成功: ${p}, 共 ${words.length} 词`);
                     break;
                 }
-            } catch(e) { /* 继续尝试 */ }
+            } catch(e) {}
         }
         if (!loaded || !words.length) {
-            // 加载失败时显示友好错误，而不是显示原始数据
-            document.getElementById('main').innerHTML = `<div class="quiz-card"><h3>⚠️ 单词库加载失败</h3><p>请确保 <strong>toefl_vocabulary.json</strong> 文件与当前页面在同一目录下。</p><button class="btn btn-primary" onclick="location.reload()">重新加载</button></div>`;
+            document.getElementById('main').innerHTML = `<div class="quiz-card"><h3>⚠️ 单词库加载失败</h3><p>请确保 <strong>toefl_vocabulary.json</strong> 文件存在。</p><button class="btn btn-primary" onclick="location.reload()">重新加载</button></div>`;
             return;
         }
-        // 加载本地存储数据
         loadData();
-        // 恢复保存的主题
         let savedTheme = localStorage.getItem(STORAGE.theme) || '1';
         applyTheme(parseInt(savedTheme));
-        // 渲染首页
         renderHome();
     }
     
-    // 绑定按钮事件
     document.getElementById('themeToggleBtn').onclick = () => { initThemeSidebar(); document.getElementById('themePanel').classList.add('open'); document.getElementById('overlay').classList.add('show'); };
     document.getElementById('mistakeBtn').onclick = () => { renderMistakePanel(); document.getElementById('mistakePanel').classList.add('open'); document.getElementById('overlay').classList.add('show'); };
     document.getElementById('homeBtn').onclick = () => goHome();
     document.getElementById('reviewMistakesBtn').onclick = () => { closePanels(); openMistakeReview(); };
     
-    // 启动
     loadWords();
     
-    // 暴露全局函数供 onclick 调用
     window.goHome = goHome; window.closePanels = closePanels; window.setTheme = setTheme;
     window.startClassic = startClassic; window.startQuiz = startQuiz; window.randomChallenge = randomChallenge;
-    window.openMistakeReview = openMistakeReview;
+    window.openMistakeReview = openMistakeReview; window.checkAnswer = checkAnswer; window.nextQuiz = nextQuiz;
+    window.retryMistake = retryMistake; window.playWordAudio = playWordAudio;
 </script>
 </body>
 </html>
